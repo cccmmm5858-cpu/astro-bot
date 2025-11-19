@@ -3,18 +3,11 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import re
-
-# ضع هنا توكن البوت الخاص بك
-TOKEN ="8250995383:AAEhCLS2gqPU0tO2UkTtWsdntek0_1AM1EM"
-bot = telebot.TeleBot(TOKEN)
-
-# =========================
+# ========================
 # إعدادات عامة
 # =========================
-
 TZ = pytz.timezone("Asia/Riyadh")   # توقيت السعودية
 ORB_DEG = 1.0                       # سماح الزاوية ±1 درجة
-
 # كواكب العبور (اسم عربي + اسم العمود في Transit.xlsx)
 TRANSIT_PLANETS = [
     ("الشمس",  "Sun Lng"),
@@ -315,3 +308,4 @@ def range_cmd(message):
 
 print("BOT RUNNING...")
 bot.polling(none_stop=True)
+
