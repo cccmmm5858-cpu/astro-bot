@@ -12,7 +12,7 @@ from threading import Thread
 # ==========================================
 # 1. إعدادات البوت والأدمن
 # ==========================================
-TOKEN = "8250995383:AAGedE3pilv1gmcw2ovj52hyTgb6t9KZlCc"
+TOKEN = "8250995383:AAEp7GD_mbhMCbURlAAOZ2pASdKzs2ydNzo"
 ADMIN_ID = 344671948 
 
 try:
@@ -496,3 +496,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"⚠️ {e}")
             time.sleep(15)
+
