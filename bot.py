@@ -5,6 +5,7 @@ import os
 import sys
 import datetime
 import time
+import json
 from flask import Flask
 from threading import Thread
 
@@ -40,9 +41,10 @@ def keep_alive():
     t.start()
 
 # ==========================================
-# 3. نظام إدارة المشتركين
+# 3. نظام إدارة المشتركين والمفضلة
 # ==========================================
 USERS_FILE = "users.txt"
+WATCHLIST_FILE = "watchlist.json"
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -72,6 +74,43 @@ def remove_user(user_id):
             for u in users: f.write(f"{u}\n")
         return True
     return False
+
+# --- إدارة المفضلة (Watchlist) ---
+def load_watchlist():
+    if not os.path.exists(WATCHLIST_FILE):
+        return {}
+    try:
+        with open(WATCHLIST_FILE, "r", encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_watchlist(data):
+    with open(WATCHLIST_FILE, "w", encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False)
+
+def add_to_favorites(user_id, stock_name):
+    data = load_watchlist()
+    uid = str(user_id)
+    if uid not in data: data[uid] = []
+    if stock_name not in data[uid]:
+        data[uid].append(stock_name)
+        save_watchlist(data)
+        return True
+    return False
+
+def remove_from_favorites(user_id, stock_name):
+    data = load_watchlist()
+    uid = str(user_id)
+    if uid in data and stock_name in data[uid]:
+        data[uid].remove(stock_name)
+        save_watchlist(data)
+        return True
+    return False
+
+def get_user_favorites(user_id):
+    data = load_watchlist()
+    return data.get(str(user_id), [])
 
 ALLOWED_USERS = load_users()
 
@@ -174,9 +213,78 @@ def load_data_once():
     except Exception as e: print(f"Error loading data: {e}")
 
 # ==========================================
-# 7. الحسابات وتنسيق الرسالة
+# 7. الحسابات (السماء + السهم) + الذكاء (Score)
 # ==========================================
-def calc_aspects(stock_name, target_date):
+def calculate_ai_score(stock_results):
+    """حساب قوة الفرصة بناءً على الزوايا والكواكب"""
+    score = 0
+    
+    # نقاط الكواكب (Benefics vs Malefics)
+    planet_scores = {
+        "المشتري": 3, "الزهرة": 2, "الشمس": 1, "القمر": 1,
+        "عطارد": 0, "أورانوس": 0, "نبتون": 0,
+        "المريخ": -1, "زحل": -2, "بلوتو": -1, 
+        "العقدة الشمالية": 1, "العقدة الجنوبية": -1
+    }
+    
+    # نقاط الزوايا
+    aspect_scores = {
+        "تثليث": 2, "تسديس": 2, # إيجابي
+        "اقتران": 0, # محايد (يعتمد على الكوكب)
+        "تربيع": -2, "مقابلة": -2 # سلبي
+    }
+
+    for res in stock_results:
+        t_planet = res["كوكب العبور"]
+        aspect = res["العلاقة"]
+        
+        p_score = planet_scores.get(t_planet, 0)
+        a_score = aspect_scores.get(aspect, 0)
+        
+        # منطق خاص للاقتران
+        if aspect == "اقتران":
+            if p_score > 0: a_score = 2 # اقتران بسعيد = ممتاز
+            elif p_score < 0: a_score = -2 # اقتران بنحس = سيء
+        
+        event_score = p_score + a_score
+        score += event_score
+
+    # تحويل النقاط إلى نجوم
+    if score >= 4: return "⭐⭐⭐⭐⭐ (فرصة ذهبية!)", "🟢"
+    elif score >= 2: return "⭐⭐⭐⭐ (فرصة قوية)", "🟢"
+    elif score >= 0: return "⭐⭐⭐ (متوسطة)", "🟡"
+    elif score >= -2: return "⭐⭐ (حذر)", "🟠"
+    else: return "⚠️ (سلبي/خطر)", "🔴"
+
+def calc_sky_aspects(target_date):
+    if GLOBAL_TRANSIT_DF is None: return []
+    start_dt = target_date.replace(hour=0, minute=0, second=0)
+    end_dt = target_date.replace(hour=23, minute=59, second=59)
+    
+    mask_time = (GLOBAL_TRANSIT_DF["Datetime"] >= start_dt) & (GLOBAL_TRANSIT_DF["Datetime"] <= end_dt)
+    tdf = GLOBAL_TRANSIT_DF.loc[mask_time].copy()
+    if tdf.empty: return []
+
+    sky_results = []
+    for _, trow in tdf.iterrows():
+        for i in range(len(TRANSIT_PLANETS)):
+            p1_name, p1_col = TRANSIT_PLANETS[i]
+            if pd.isna(trow.get(p1_col)): continue
+            for j in range(i + 1, len(TRANSIT_PLANETS)):
+                p2_name, p2_col = TRANSIT_PLANETS[j]
+                if pd.isna(trow.get(p2_col)): continue
+                ang = angle_diff(float(trow[p1_col]), float(trow[p2_col]))
+                asp, exact, dev, icon = get_aspect_details(ang, orb=1.0)
+                if asp:
+                    sky_results.append({
+                        "p1": p1_name, "p2": p2_name,
+                        "p1_deg": float(trow[p1_col]), "p2_deg": float(trow[p2_col]),
+                        "aspect": asp, "icon": icon, "exact": exact,
+                        "time": trow["Datetime"], "dev": dev
+                    })
+    return sky_results
+
+def calc_stock_aspects(stock_name, target_date):
     if GLOBAL_STOCK_DF is None or GLOBAL_TRANSIT_DF is None: return [], None
     start_dt = target_date.replace(hour=0, minute=0, second=0)
     end_dt = target_date.replace(hour=23, minute=59, second=59)
@@ -209,63 +317,112 @@ def calc_aspects(stock_name, target_date):
 def format_time_ar(dt):
     return dt.strftime("%I:%M %p").replace("AM", "صباحاً").replace("PM", "مساءً")
 
-def format_msg(stock_name, results, target_date):
-    if not results: return f"لا توجد زوايا فلكية لسهم {stock_name} بتاريخ {target_date.strftime('%Y-%m-%d')}."
-    
-    df = pd.DataFrame(results).sort_values("الوقت")
-    groups = df.groupby(["كوكب العبور", "كوكب السهم", "العلاقة"])
-    
-    summary_lines = [f"📌 **السهم:** {stock_name}\n📅 **التاريخ:** {target_date.strftime('%Y-%m-%d')}\n"]
-    detail_lines = ["\n──────────────\n*(التفاصيل الكاملة)*\n"]
+def format_msg(stock_name, stock_results, sky_results, target_date):
+    # حساب التقييم الذكي
+    ai_rating, ai_color = calculate_ai_score(stock_results) if stock_results else ("⚪ (لا يوجد نشاط)", "⚪")
 
-    for (tplanet, nplanet, aspect), g in groups:
-        start_time = g.iloc[0]["الوقت"]
-        end_time = g.iloc[-1]["الوقت"]
-        best_row = g.loc[g['deviation'].idxmin()]
-        exact_time = best_row["الوقت"]
+    msg = [
+        f"📌 **السهم:** {stock_name}",
+        f"📅 **التاريخ:** {target_date.strftime('%Y-%m-%d')}",
+        f"🧠 **تقييم الفرصة:** {ai_rating}\n"
+    ]
+
+    # --- القسم الأول: حالة السماء العامة ---
+    msg.append("🌍 **حالة السماء العامة (Transit to Transit):**")
+    if not sky_results:
+        msg.append("_(لا توجد اتصالات رئيسية بين الكواكب اليوم)_")
+    else:
+        df_sky = pd.DataFrame(sky_results).sort_values("time")
+        groups_sky = df_sky.groupby(["p1", "p2", "aspect"])
         
-        t_deg = best_row['درجة العبور']
-        n_deg = best_row['درجة المولد']
-        icon = best_row['الرمز']
-        
-        t_sign = get_sign_name(t_deg)
-        t_status = get_planet_status(tplanet, t_sign)
-        timeframe = TRANSIT_TIMEFRAMES.get(tplanet, "")
+        for (p1, p2, asp), g in groups_sky:
+            start_time = g.iloc[0]["time"]
+            end_time = g.iloc[-1]["time"]
+            best_row = g.loc[g['dev'].idxmin()]
+            p1_sign = get_sign_name(best_row['p1_deg'])
+            p2_sign = get_sign_name(best_row['p2_deg'])
+            icon = best_row['icon']
+            duration_hours = (end_time - start_time).total_seconds() / 3600
+            time_str = "🔄 مستمر طوال اليوم" if duration_hours > 20 else f"{format_time_ar(start_time)} ➔ {format_time_ar(end_time)}"
+            msg.append(f"⏳ {time_str}\n✨ **{p1}** ({p1_sign}) {asp} {icon} **{p2}** ({p2_sign})\n")
 
-        summary_lines.append(
-            f"⏳ **زمن العبور:** {format_time_ar(start_time)} ➔ {format_time_ar(end_time)}\n"
-            f"✨ **{tplanet}** ({t_sign}) {aspect} **{nplanet}** ({get_sign_name(n_deg)})\n"
-        )
+    msg.append("\n──────────────\n")
+    
+    # --- القسم الثاني: التأثير على السهم ---
+    msg.append(f"🎯 **التأثير على سهم {stock_name} (Transit to Natal):**")
+    
+    if not stock_results:
+        msg.append(f"_(لا توجد زوايا فلكية مؤثرة على السهم اليوم)_")
+    else:
+        df_stock = pd.DataFrame(stock_results).sort_values("الوقت")
+        groups_stock = df_stock.groupby(["كوكب العبور", "كوكب السهم", "العلاقة"])
 
-        detail_lines.append(
-            "──────────────\n"
-            f"🔸 **{tplanet}** في **{t_sign} {int(get_sign_degree(t_deg))}°**{t_status}\n"
-            f"🔸 **{nplanet}** مولد في **{get_sign_name(n_deg)} {int(get_sign_degree(n_deg))}°**\n"
-            f"🔹 **العلاقة:** {aspect} {icon} ({int(best_row['الزاوية التامة'])}°)\n"
-            f"🔹 **الفريم:** {timeframe}\n"
-            f"⏰ {format_time_ar(start_time)} ➔ 🎯 {format_time_ar(exact_time)} ➔ 🏁 {format_time_ar(end_time)}\n"
-        )
+        for (tplanet, nplanet, aspect), g in groups_stock:
+            start_time = g.iloc[0]["الوقت"]
+            end_time = g.iloc[-1]["الوقت"]
+            best_row = g.loc[g['deviation'].idxmin()]
+            exact_time = best_row["الوقت"]
+            t_deg = best_row['درجة العبور']
+            n_deg = best_row['درجة المولد']
+            icon = best_row['الرمز']
+            t_sign = get_sign_name(t_deg)
+            t_status = get_planet_status(tplanet, t_sign)
+            duration_hours = (end_time - start_time).total_seconds() / 3600
+            time_str = "🔄 مستمر طوال اليوم" if duration_hours > 20 else f"{format_time_ar(start_time)} ➔ {format_time_ar(end_time)}"
 
-    full_msg = "".join(summary_lines) + "".join(detail_lines)
-    return full_msg[:4000]
+            msg.append(
+                f"\n🔹 **{tplanet}** (العبور) {aspect} {icon} **{nplanet}** (السهم)\n"
+                f"   🔸 {tplanet} في {t_sign} {int(get_sign_degree(t_deg))}°{t_status}\n"
+                f"   🔸 {nplanet} في {get_sign_name(n_deg)} {int(get_sign_degree(n_deg))}°\n"
+                f"   ⏰ {time_str}"
+            )
+
+    return "\n".join(msg)[:4000]
 
 # ==========================================
 # 8. لوحة التحكم والأوامر
 # ==========================================
-def get_stock_keyboard():
+def get_main_menu_keyboard():
     markup = InlineKeyboardMarkup()
-    if GLOBAL_STOCK_DF is not None:
-        for stock in GLOBAL_STOCK_DF["السهم"].unique():
-            markup.add(InlineKeyboardButton(stock, callback_data=f"view:{stock}:{datetime.date.today()}"))
+    markup.row(InlineKeyboardButton("📈 جميع الأسهم", callback_data="list_all"))
+    markup.row(InlineKeyboardButton("⭐ مفضلتي (Watchlist)", callback_data="list_fav"))
     return markup
 
-def get_nav_keyboard(stock_name, current_date_str):
+def get_stock_list_keyboard(page=0):
+    markup = InlineKeyboardMarkup()
+    if GLOBAL_STOCK_DF is not None:
+        stocks = GLOBAL_STOCK_DF["السهم"].unique()
+        for stock in stocks:
+            markup.add(InlineKeyboardButton(stock, callback_data=f"view:{stock}:{datetime.date.today()}"))
+    markup.row(InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu"))
+    return markup
+
+def get_fav_list_keyboard(user_id):
+    markup = InlineKeyboardMarkup()
+    favs = get_user_favorites(user_id)
+    if not favs:
+        markup.add(InlineKeyboardButton("📭 القائمة فارغة", callback_data="ignore"))
+    else:
+        for stock in favs:
+            markup.add(InlineKeyboardButton(f"⭐ {stock}", callback_data=f"view:{stock}:{datetime.date.today()}"))
+    markup.row(InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu"))
+    return markup
+
+def get_nav_keyboard(stock_name, current_date_str, user_id):
     curr_date = datetime.datetime.strptime(current_date_str, "%Y-%m-%d").date()
     markup = InlineKeyboardMarkup()
+    
     markup.row(
         InlineKeyboardButton("⬅️ السابق", callback_data=f"view:{stock_name}:{curr_date - datetime.timedelta(days=1)}"),
         InlineKeyboardButton("التالي ➡️", callback_data=f"view:{stock_name}:{curr_date + datetime.timedelta(days=1)}")
     )
+    
+    favs = get_user_favorites(user_id)
+    if stock_name in favs:
+        markup.row(InlineKeyboardButton("❌ حذف من المفضلة", callback_data=f"fav_remove:{stock_name}"))
+    else:
+        markup.row(InlineKeyboardButton("⭐ إضافة للمفضلة", callback_data=f"fav_add:{stock_name}"))
+        
     markup.row(InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu"))
     return markup
 
@@ -303,28 +460,51 @@ def start_command(message):
     if message.from_user.id not in ALLOWED_USERS:
         bot.reply_to(message, "⛔ للمشتركين فقط.")
         return
-    bot.reply_to(message, "مرحباً! اختر سهماً:", reply_markup=get_stock_keyboard())
+    bot.reply_to(message, "مرحباً! اختر القائمة:", reply_markup=get_main_menu_keyboard())
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     if call.from_user.id not in ALLOWED_USERS: return
     data = call.data.split(":")
+    action = data[0]
     
-    if data[0] == "main_menu":
-        bot.edit_message_text("اختر سهماً:", call.message.chat.id, call.message.message_id, reply_markup=get_stock_keyboard())
-    elif data[0] == "view":
+    if action == "main_menu":
+        bot.edit_message_text("اختر القائمة:", call.message.chat.id, call.message.message_id, reply_markup=get_main_menu_keyboard())
+    
+    elif action == "list_all":
+        bot.edit_message_text("📈 جميع الأسهم المتاحة:", call.message.chat.id, call.message.message_id, reply_markup=get_stock_list_keyboard())
+        
+    elif action == "list_fav":
+        bot.edit_message_text("⭐ قائمتك المفضلة:", call.message.chat.id, call.message.message_id, reply_markup=get_fav_list_keyboard(call.from_user.id))
+        
+    elif action == "fav_add":
+        stock = data[1]
+        add_to_favorites(call.from_user.id, stock)
+        bot.answer_callback_query(call.id, f"✅ تمت إضافة {stock} للمفضلة")
+        bot.edit_message_text("⭐ قائمتك المفضلة:", call.message.chat.id, call.message.message_id, reply_markup=get_fav_list_keyboard(call.from_user.id))
+
+    elif action == "fav_remove":
+        stock = data[1]
+        remove_from_favorites(call.from_user.id, stock)
+        bot.answer_callback_query(call.id, f"❌ تمت إزالة {stock} من المفضلة")
+        bot.edit_message_text("⭐ قائمتك المفضلة:", call.message.chat.id, call.message.message_id, reply_markup=get_fav_list_keyboard(call.from_user.id))
+
+    elif action == "view":
         stock, date_str = data[1], data[2]
         target_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-        res, real_name = calc_aspects(stock, target_date)
+        
+        sky_res = calc_sky_aspects(target_date)
+        stock_res, real_name = calc_stock_aspects(stock, target_date)
+        
         try:
-            bot.edit_message_text(format_msg(real_name or stock, res, target_date), 
-                                  call.message.chat.id, call.message.message_id, 
-                                  reply_markup=get_nav_keyboard(stock, date_str))
+            msg = format_msg(real_name or stock, stock_res, sky_res, target_date)
+            bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, 
+                                  reply_markup=get_nav_keyboard(stock, date_str, call.from_user.id))
         except: pass
 
 if __name__ == "__main__":
     load_data_once()
-    keep_alive() # ✅ تشغيل السيرفر الوهمي
+    keep_alive()
     print("BOT RUNNING...")
     while True:
         try:
