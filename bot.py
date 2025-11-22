@@ -11,7 +11,7 @@ from threading import Thread
 # ==========================================
 # 1. إعدادات البوت والأدمن
 # ==========================================
-TOKEN = "8250995383:AAEhCLS2gqPU0tO2UkTtWsdntek0_1AM1EM"
+TOKEN = "8250995383:AAFs-UHst6PkeVbPkuuMQzglo7S2yapd_8c"
 
 # ضع رقمك هنا (أنت فقط من يستطيع إضافة/حذف المشتركين)
 ADMIN_ID = 344671948 
@@ -363,4 +363,5 @@ if __name__ == "__main__":
             bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception as e:
             print(f"⚠️ {e}")
+
             time.sleep(5)
