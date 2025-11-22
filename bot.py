@@ -5,15 +5,11 @@ import os
 import sys
 import datetime
 import time
-from flask import Flask
-from threading import Thread
 
 # ==========================================
 # 1. إعدادات البوت والأدمن
 # ==========================================
 TOKEN = "8250995383:AAFs-UHst6PkeVbPkuuMQzglo7S2yapd_8c"
-
-# ضع رقمك هنا (أنت فقط من يستطيع إضافة/حذف المشتركين)
 ADMIN_ID = 344671948 
 
 try:
@@ -28,9 +24,7 @@ except Exception as e:
 USERS_FILE = "users.txt"
 
 def load_users():
-    """تحميل قائمة المشتركين من الملف"""
     if not os.path.exists(USERS_FILE):
-        # إذا الملف غير موجود، ننشئه ونضيف الأدمن تلقائياً
         with open(USERS_FILE, "w") as f:
             f.write(str(ADMIN_ID) + "\n")
         return [ADMIN_ID]
@@ -41,13 +35,11 @@ def load_users():
             try:
                 users.append(int(line.strip()))
             except: pass
-        # تأكد أن الأدمن دائماً موجود
         if ADMIN_ID not in users:
             users.append(ADMIN_ID)
         return users
 
 def save_user(user_id):
-    """إضافة مشترك جديد للملف"""
     users = load_users()
     if user_id not in users:
         with open(USERS_FILE, "a") as f:
@@ -56,18 +48,15 @@ def save_user(user_id):
     return False
 
 def remove_user(user_id):
-    """حذف مشترك من الملف"""
     users = load_users()
     if user_id in users:
         users.remove(user_id)
-        # إعادة كتابة الملف بالكامل بدون المستخدم المحذوف
         with open(USERS_FILE, "w") as f:
             for u in users:
                 f.write(f"{u}\n")
         return True
     return False
 
-# تحميل القائمة عند البدء
 ALLOWED_USERS = load_users()
 
 # ==========================================
@@ -133,7 +122,6 @@ def load_data_once():
 
     if not os.path.exists("Stock.xlsx") or not os.path.exists("Transit.xlsx"):
         print("❌ الملفات غير موجودة!")
-        # لن نغلق البرنامج هنا لكي يعمل السيرفر حتى لو الملفات ناقصة
         return 
 
     try:
@@ -268,7 +256,7 @@ def add_user_cmd(message):
         new_id = int(message.text.split()[1])
         if save_user(new_id):
             global ALLOWED_USERS
-            ALLOWED_USERS = load_users() # تحديث القائمة في الذاكرة
+            ALLOWED_USERS = load_users()
             bot.reply_to(message, f"✅ تم تفعيل الاشتراك للعضو: {new_id}")
         else:
             bot.reply_to(message, "⚠️ العضو مشترك بالفعل.")
@@ -335,33 +323,18 @@ def handle_query(call):
         except: pass
 
 # ==========================================
-# 10. سيرفر Flask الوهمي (للتشغيل 24 ساعة)
-# ==========================================
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "I am alive!"
-
-def run_server():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run_server)
-    t.start()
-
-# ==========================================
-# 11. التشغيل
+# 10. التشغيل (بدون Flask)
 # ==========================================
 if __name__ == "__main__":
     load_data_once()
-    keep_alive() # تشغيل السيرفر
     print("BOT RUNNING... (Press Ctrl+C to stop)")
     
     while True:
         try:
-            bot.polling(none_stop=True, interval=0, timeout=20)
+            # إضافة مهلة قصيرة بين الطلبات لتخفيف الضغط
+            bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as e:
-            print(f"⚠️ {e}")
-
-            time.sleep(5)
+            print(f"⚠️ Error: {e}")
+            # إذا حدث تعارض، انتظر 15 ثانية قبل المحاولة مرة أخرى
+            # هذا يسمح للنسخة الأخرى بالإغلاق أو يمنع تكرار الخطأ بسرعة
+            time.sleep(15)
