@@ -15,7 +15,7 @@ from transits import calc_transit_to_transit, get_current_planetary_positions, a
 # ==========================================
 # 1. إعدادات البوت
 # ==========================================
-TOKEN = "8250995383:AAEhCLS2gqPU0tO2UkTtWsdntek0_1AM1EM"
+TOKEN = "8250995383:AAEp7GD_mbhMCbURlAAOZ2pASdKzs2ydNzo"
 
 ALLOWED_USERS = [
     344671948  # ضع الـ ID الخاص بك هنا
