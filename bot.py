@@ -7,19 +7,19 @@ import datetime
 import time
 
 # استيراد الوحدات الجديدة
-from config import TRANSIT_PLANETS, TRANSIT_TIMEFRAMES, ZODIAC_SIGNS, ASPECTS
+# استيراد الوحدات الجديدة
+from config import TRANSIT_PLANETS, TRANSIT_TIMEFRAMES, ZODIAC_SIGNS, ASPECTS, TOKEN, ALLOWED_USERS
+from dignity import get_sign_name, get_sign_degree, format_planet_position, get_planet_dignity
+from rating import calculate_opportunity_rating
 from dignity import get_sign_name, get_sign_degree, format_planet_position, get_planet_dignity
 from rating import calculate_opportunity_rating
 from transits import calc_transit_to_transit, get_current_planetary_positions, angle_diff, get_aspect_details
+from moon_trading import check_moon_intraday
 
 # ==========================================
 # 1. إعدادات البوت
 # ==========================================
-TOKEN = "8250995383:AAEp7GD_mbhMCbURlAAOZ2pASdKzs2ydNzo"
-
-ALLOWED_USERS = [
-    344671948  # ضع الـ ID الخاص بك هنا
-]
+# TOKEN & ALLOWED_USERS moved to config.py
 
 try:
     bot = telebot.TeleBot(TOKEN)
@@ -36,13 +36,16 @@ GLOBAL_TRANSIT_DF = None
 # ==========================================
 # 3. تحميل البيانات
 # ==========================================
+# ==========================================
+# 3. تحميل البيانات
+# ==========================================
 def load_data_once():
     global GLOBAL_STOCK_DF, GLOBAL_TRANSIT_DF
-    print("جاري تحميل البيانات...")
+    print("Loading data...")
 
     if not os.path.exists("Stock.xlsx") or not os.path.exists("Transit.xlsx"):
-        print("❌ الملفات غير موجودة!")
-        sys.exit(1)
+        print("Files not found!")
+        return False
 
     try:
         # Stock
@@ -61,19 +64,24 @@ def load_data_once():
 
         if frames:
             GLOBAL_STOCK_DF = pd.concat(frames, ignore_index=True)
-            print(f"✅ تم تحميل الأسهم: {len(GLOBAL_STOCK_DF)} صف.")
+            print(f"Stock data loaded: {len(GLOBAL_STOCK_DF)} rows.")
         else:
-            print("⚠️ لا توجد بيانات صالحة في Stock.xlsx")
+            print("No valid data in Stock.xlsx")
 
         # Transit
         df_trans = pd.read_excel("Transit.xlsx")
         df_trans["Datetime"] = pd.to_datetime(df_trans["Datetime"], errors="coerce")
         GLOBAL_TRANSIT_DF = df_trans.dropna(subset=["Datetime"])
-        print(f"✅ تم تحميل العبور: {len(GLOBAL_TRANSIT_DF)} صف.")
+        print(f"Transit data loaded: {len(GLOBAL_TRANSIT_DF)} rows.")
+        return True
 
     except Exception as e:
-        print(f"❌ خطأ في التحميل: {e}")
-        sys.exit(1)
+        print(f"Error loading data: {e}")
+        return False
+
+def reload_data():
+    """إعادة تحميل البيانات وتحديث المتغيرات العامة"""
+    return load_data_once()
 
 # ==========================================
 # 4. حساب العلاقات (Transit to Natal)
@@ -103,9 +111,27 @@ def calc_aspects(stock_name, target_date):
                     continue
 
                 ang = angle_diff(srow["الدرجة الفلكية"], float(trow[col]))
-                asp, exact, dev, icon, asp_type = get_aspect_details(ang)
+                asp, exact, dev, icon, asp_type, is_applying = get_aspect_details(ang)
 
                 if asp:
+                    # 1. Node Logic: Ignore Opposition if Node involved
+                    if "Node" in t_name or "العقدة" in t_name:
+                         if exact == 180: # Opposition
+                             continue
+
+                    # 2. Action/Reaction Logic
+                    # If exact (deviation very small, e.g. < 0.1), reverse the sentiment
+                    final_type = asp_type
+                    reaction_note = ""
+                    
+                    if dev < 0.1: # Exact / Samim
+                        if asp_type == "negative":
+                            final_type = "positive"
+                            reaction_note = " (ردة فعل إيجابية 🟢)"
+                        elif asp_type == "positive":
+                            final_type = "negative"
+                            reaction_note = " (ردة فعل سلبية 🔴)"
+                    
                     results.append({
                         "السهم": srow["السهم"],
                         "كوكب السهم": srow["الكوكب"],
@@ -115,7 +141,8 @@ def calc_aspects(stock_name, target_date):
                         "العلاقة": asp,
                         "الزاوية التامة": exact,
                         "الرمز": icon,
-                        "النوع": asp_type,
+                        "النوع": final_type,
+                        "ملاحظة": reaction_note,
                         "درجة المولد": srow["الدرجة الفلكية"],
                         "درجة العبور": float(trow[col]),
                         "الوقت": trow["Datetime"],
@@ -135,13 +162,35 @@ def format_msg(stock_name, results, target_date):
     # حساب التقييم
     stars, rating_text, score = calculate_opportunity_rating(results)
 
+    # --- Combined Rating Logic ---
+    # 1. Calculate General Transit Rating
+    transit_aspects = calc_transit_to_transit(GLOBAL_TRANSIT_DF, target_date)
+    gen_score = 0
+    for t_asp in transit_aspects:
+        if t_asp['النوع'] == 'positive': gen_score += 1
+        elif t_asp['النوع'] == 'negative': gen_score -= 1
+    
+    gen_rating = "positive" if gen_score >= 0 else "negative"
+    stock_rating = "positive" if score >= 0 else "negative"
+
+    combined_status = ""
+    if gen_rating == "negative" and stock_rating == "positive":
+        combined_status = "⚠️ الحركة ضعيفة (الزمن العام سلبي)"
+    elif gen_rating == "negative" and stock_rating == "negative":
+        combined_status = "⛔ طحن خطر (الزمن العام والسهم سلبيان)"
+    elif gen_rating == "positive" and stock_rating == "positive":
+        combined_status = "🚀 صعود (الزمن العام والسهم إيجابيان)"
+    else:
+        combined_status = "⚖️ متباين"
+
     # الترويسة مع التقييم
     header = (
         f"📌 **السهم:** {stock_name}\n"
         f"📅 **التاريخ:** {target_date.strftime('%Y-%m-%d')}\n"
-        f"🧠 **تقييم الفرصة:** {stars} ({rating_text})\n\n"
+        f"🧠 **تقييم الفرصة:** {stars} ({rating_text})\n"
+        f"📊 **الوضع العام:** {combined_status}\n\n"
         f"──────────────\n\n"
-        f"🎯 **التأثير على سهم {stock_name} (Transit to Natal):**\n\n"
+        f"🎯 **الفواصل للزوايا السلبيه والايجابيه هذا اليوم:**\n\n"
     )
 
     # تجميع العلاقات
@@ -183,9 +232,26 @@ def format_msg(stock_name, results, target_date):
             f"   🔸 {transit_pos}\n"
             f"   🔸 {nplanet} في {natal_sign} {natal_deg}°\n"
             f"   ⏱️ **الفريم:** {TRANSIT_TIMEFRAMES.get(tplanet, '-')}\n"
+            f"   📝 **الحالة:** {best_row.get('ملاحظة', '')}\n"
             f"   {time_text}\n\n"
         )
         lines.append(block)
+
+        lines.append(block)
+
+    # إضافة ملخص الزمن العام (بدون تغيير تفاصيل السهم)
+    lines.append("──────────────\n🌍 **الزمن العام (Transit to Transit):**\n")
+    # نستخدم دالة format_transit_msg لكن نحتاج لتعديلها لترجع نصاً مختصراً أو نستخدمها كما هي
+    # هنا سنقوم بجلب العلاقات فقط وإضافتها
+    if not transit_aspects:
+        lines.append("لا توجد علاقات عامة نشطة.\n")
+    else:
+        for result in transit_aspects[:5]: # عرض أهم 5 علاقات عامة
+             planet1_pos = format_planet_position(result["كوكب1"], result["درجة1"])
+             planet2_pos = format_planet_position(result["كوكب2"], result["درجة2"])
+             lines.append(
+                f"🔹 {result['رمز1']} {result['العلاقة']} {result['الرمز']} {result['رمز2']}\n"
+             )
 
     return "".join(lines)[:4000]
 
@@ -244,6 +310,8 @@ def get_main_menu():
         InlineKeyboardButton("📊 تحليل الأسهم", callback_data="menu:stocks"),
         InlineKeyboardButton("🌍 الزمن العام", callback_data="menu:transits")
     )
+    markup.row(InlineKeyboardButton("🌙 المضاربة اليومية (القمر)", callback_data="menu:moon"))
+    markup.row(InlineKeyboardButton("🔄 تحديث البيانات", callback_data="admin:reload"))
     return markup
 
 def get_stock_keyboard():
@@ -338,6 +406,44 @@ def handle_query(call):
                 parse_mode="Markdown"
             )
 
+        elif menu_type == "moon":
+            if GLOBAL_STOCK_DF is None or GLOBAL_TRANSIT_DF is None:
+                bot.answer_callback_query(call.id, "⚠️ لا توجد بيانات أسهم أو عبور محملة!")
+                return
+
+            results, moon_sign, moon_deg = check_moon_intraday(GLOBAL_STOCK_DF, GLOBAL_TRANSIT_DF)
+            
+            header = (
+                f"🌙 **المضاربة اليومية على القمر**\n"
+                f"📍 **موقع القمر:** {moon_sign} {int(moon_deg)}°\n"
+                f"⏰ **الوقت:** {datetime.datetime.now().strftime('%H:%M')}\n\n"
+                f"──────────────\n\n"
+            )
+            
+            if not results:
+                msg_text = header + "لا توجد فرص مضاربة نشطة حالياً (فريم 15د - 1س).\n"
+            else:
+                msg_text = header
+                for res in results:
+                    msg_text += (
+                        f"🔹 **{res['السهم']}** ({res['الكوكب']})\n"
+                        f"   {res['العلاقة']} {res['الرمز']} القمر\n"
+                        f"   {res['الحالة']}\n"
+                        f"   💡 {res['النصيحة']}\n\n"
+                    )
+            
+            markup = InlineKeyboardMarkup()
+            markup.row(InlineKeyboardButton("🔄 تحديث", callback_data="menu:moon"))
+            markup.row(InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu"))
+            
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=msg_text[:4000],
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+
     elif action == "view":
         stock_name = data[1]
         date_str = data[2]
@@ -359,12 +465,21 @@ def handle_query(call):
         except:
             pass  # تجاهل الخطأ إذا كانت الرسالة لم تتغير
 
+    elif action == "admin":
+        if data[1] == "reload":
+            bot.answer_callback_query(call.id, "جاري تحديث البيانات...")
+            success = reload_data()
+            if success:
+                bot.send_message(call.message.chat.id, "✅ تم تحديث البيانات بنجاح!")
+            else:
+                bot.send_message(call.message.chat.id, "❌ حدث خطأ أثناء تحديث البيانات.")
+
 # ==========================================
 # 9. التشغيل
 # ==========================================
 if __name__ == "__main__":
     load_data_once()
-    print("🚀 BOT RUNNING... (Press Ctrl+C to stop)")
+    print("BOT RUNNING... (Press Ctrl+C to stop)")
     while True:
         try:
             bot.polling(none_stop=True, interval=0, timeout=20)

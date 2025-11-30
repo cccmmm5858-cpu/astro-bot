@@ -16,14 +16,38 @@ def angle_diff(a, b):
 def get_aspect_details(angle, orb=1.0):
     """
     تحديد نوع العلاقة الفلكية
-    Returns: (name, exact_angle, deviation, icon, aspect_type)
+    Returns: (name, exact_angle, deviation, icon, aspect_type, is_applying)
     """
     for exact, name, icon, aspect_type in ASPECTS:
-        diff = abs(angle - exact)
-        aspect_orb = ASPECT_ORBS.get(exact, orb)
-        if diff <= aspect_orb:
-            return name, exact, diff, icon, aspect_type
-    return None, None, None, None, None
+        diff = angle - exact
+        
+        # Applying Logic: Degree before to Exact (e.g. 89 to 90)
+        # We want diff to be between -orb and 0 (approaching) OR 0 (exact)
+        # But wait, user said "Degree before to Exact only".
+        # So if exact is 90, we accept 89.0 to 90.0.
+        # diff = angle - exact. If angle is 89, diff is -1. If angle is 90, diff is 0.
+        # If angle is 91, diff is +1 (Separating - Reject).
+        
+        # However, angle_diff handles circularity. Let's stick to simple diff first for logic check.
+        # But we need to handle the circle (359 -> 0).
+        
+        # Let's use the absolute diff for the standard check first, then refine for "Applying".
+        # Actually, standard astrology: Applying is when faster planet approaches slower.
+        # Here we simplify: User wants "Degree before to Exact".
+        # So we check if the angle is in range [exact - orb, exact].
+        
+        # Handle circularity for Conjunction (0)
+        if exact == 0:
+            # Range: [360-orb, 360] OR [0, 0]
+            # If angle is 359, it's applying to 0.
+            if (angle >= 360 - orb) or (angle == 0) or (angle <= 0 + 0.1): # Allow small margin for 0
+                 return name, exact, abs(angle - exact if angle < 180 else angle - 360), icon, aspect_type, True
+        else:
+            # For other aspects, we want angle to be < exact but within orb.
+            if (exact - orb) <= angle <= (exact + 0.05): # Allow small margin for exact
+                return name, exact, abs(exact - angle), icon, aspect_type, True
+                
+    return None, None, None, None, None, False
 
 def calc_transit_to_transit(transit_df, target_datetime):
     """
