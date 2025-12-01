@@ -362,6 +362,7 @@ def handle_query(call):
 
     data = call.data.split(":")
     action = data[0]
+    print(f"DEBUG: Received callback action: {action}, data: {data}") # Debug log
 
     if action == "main_menu":
         welcome_text = (
@@ -382,6 +383,10 @@ def handle_query(call):
         menu_type = data[1]
         
         if menu_type == "stocks":
+            if GLOBAL_STOCK_DF is None:
+                bot.answer_callback_query(call.id, "⚠️ لا توجد بيانات أسهم محملة!")
+                return
+
             bot.edit_message_text(
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
@@ -391,7 +396,11 @@ def handle_query(call):
             )
         
         elif menu_type == "transits":
-            now = datetime.datetime.now()
+            if GLOBAL_TRANSIT_DF is None:
+                bot.answer_callback_query(call.id, "⚠️ لا توجد بيانات عبور محملة!")
+                return
+
+            now = datetime.datetime.now() + datetime.timedelta(hours=3)
             transit_msg = format_transit_msg(now)
             
             markup = InlineKeyboardMarkup()

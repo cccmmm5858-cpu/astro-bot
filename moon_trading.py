@@ -73,8 +73,8 @@ def check_moon_intraday(stock_df, transit_df):
         
         angle = angle_diff(moon_abs_deg, stock_planet_deg)
         
-        # نستخدم دالة get_aspect_details مع orb ضيق (1.0 درجة = ساعتين)
-        asp_name, exact, dev, icon, asp_type, is_applying = get_aspect_details(angle, orb=1.0)
+        # نستخدم دالة get_aspect_details مع orb أوسع (2.5 درجة = 5 ساعات)
+        asp_name, exact, dev, icon, asp_type, is_applying = get_aspect_details(angle, orb=2.5)
         
         if asp_name and is_applying:
             # تحديد الحالة بدقة
