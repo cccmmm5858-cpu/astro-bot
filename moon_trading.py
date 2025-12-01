@@ -53,17 +53,33 @@ def get_moon_position_interpolated(transit_df, target_dt):
     
     return sign_name, degree_in_sign, current_pos
 
-def check_moon_intraday(stock_df, transit_df):
+def check_moon_intraday(stock_df, transit_df, target_date=None):
     """
     فحص فرص المضاربة اللحظية للقمر مع أسهم القائمة
     """
-    # تعديل التوقيت للسعودية (UTC+3) لضمان دقة الحساب
-    now_ksa = datetime.datetime.now() + datetime.timedelta(hours=3)
+    # تحديد التاريخ المستهدف (افتراضياً الآن بتوقيت السعودية)
+    if target_date is None:
+        now_ksa = datetime.datetime.now() + datetime.timedelta(hours=3)
+    else:
+        # إذا تم تمرير تاريخ، نستخدم منتصف ذلك اليوم كنقطة مرجعية
+        now_ksa = target_date.replace(hour=12, minute=0, second=0)
+
     sign_name, moon_deg_sign, moon_abs_deg = get_moon_position_interpolated(transit_df, now_ksa)
     
     if sign_name is None:
         return [], "غير معروف", 0
     
+    # تحديد عنصر البرج
+    element = ""
+    if sign_name in ["الحمل", "الأسد", "القوس"]:
+        element = "ناري 🔥"
+    elif sign_name in ["الثور", "العذراء", "الجدي"]:
+        element = "ترابي ⛰️"
+    elif sign_name in ["الجوزاء", "الميزان", "الدلو"]:
+        element = "هوائي 💨"
+    elif sign_name in ["السرطان", "العقرب", "الحوت"]:
+        element = "مائي 💧"
+
     results = []
     
     for _, row in stock_df.iterrows():
@@ -73,23 +89,23 @@ def check_moon_intraday(stock_df, transit_df):
         
         angle = angle_diff(moon_abs_deg, stock_planet_deg)
         
-        # نستخدم دالة get_aspect_details مع orb أوسع (2.5 درجة = 5 ساعات)
+        # نستخدم دالة get_aspect_details مع orb أوسع (2.5 درجة)
         asp_name, exact, dev, icon, asp_type, is_applying = get_aspect_details(angle, orb=2.5)
         
-        if asp_name and is_applying:
-            # تحديد الحالة بدقة
+        # الشرط الجديد: تفعيل العلاقة إذا كانت في حدود 1 درجة (تفعيل أو صميم)
+        if asp_name and is_applying and dev <= 1.0:
             status = ""
             advice = ""
             
-            # الصميم (أقل من 0.1 درجة - حوالي 10-15 دقيقة)
+            # الصميم (أقل من 0.1 درجة)
             if dev < 0.1:
                 status = "🔥 **في الصميم (Now)**"
                 if asp_type == "positive":
-                    advice = "⚠️ **انتبه:** ردة فعل سلبية متوقعة (جني أرباح)"
-                else:
                     advice = "✅ **فرصة:** ردة فعل إيجابية متوقعة (ارتداد)"
+                else:
+                    advice = "⚠️ **انتبه:** ردة فعل سلبية متوقعة (جني أرباح)"
             
-            # التفعيل (بين 0.1 و 1.0 درجة - قادم للصميم)
+            # التفعيل (بين 0.1 و 1.0 درجة)
             else:
                 status = "⏳ **تفعيل (قادم للصميم)**"
                 if asp_type == "positive":
@@ -106,7 +122,9 @@ def check_moon_intraday(stock_df, transit_df):
                 "النصيحة": advice,
                 "moon_sign": sign_name,
                 "moon_deg": moon_deg_sign,
-                "dev": dev
+                "dev": dev,
+                "element": element,
+                "type": asp_type
             })
             
-    return results, sign_name, moon_deg_sign
+    return results, sign_name, moon_deg_sign, element
