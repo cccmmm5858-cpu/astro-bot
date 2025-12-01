@@ -57,8 +57,9 @@ def check_moon_intraday(stock_df, transit_df):
     """
     فحص فرص المضاربة اللحظية للقمر مع أسهم القائمة
     """
-    now = datetime.datetime.now()
-    sign_name, moon_deg_sign, moon_abs_deg = get_moon_position_interpolated(transit_df, now)
+    # تعديل التوقيت للسعودية (UTC+3) لضمان دقة الحساب
+    now_ksa = datetime.datetime.now() + datetime.timedelta(hours=3)
+    sign_name, moon_deg_sign, moon_abs_deg = get_moon_position_interpolated(transit_df, now_ksa)
     
     if sign_name is None:
         return [], "غير معروف", 0
