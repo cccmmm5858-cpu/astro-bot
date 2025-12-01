@@ -21,7 +21,7 @@ TRANSIT_PLANETS = [
 # الفريمات الزمنية لكل كوكب
 TRANSIT_TIMEFRAMES = {
     "القمر": "15m / 1H",
-    "الشمس": "4H / 10H",
+    "الشمس": "4H / 1Day",
     "عطارد": "1H / 4H",
     "الزهرة": "1H / 4H",
     "المريخ": "4H / 1Day",
@@ -134,7 +134,6 @@ MALEFIC_PLANETS = ["زحل", "المريخ"]
 # إعدادات البوت والأمان
 # ==========================================
 TOKEN = "8250995383:AAEp7GD_mbhMCbURlAAOZ2pASdKzs2ydNzo"
-
 ALLOWED_USERS = [
     344671948  # Admin ID
 ]
