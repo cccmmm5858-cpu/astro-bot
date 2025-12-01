@@ -416,7 +416,7 @@ def handle_query(call):
             header = (
                 f"🌙 **المضاربة اليومية على القمر**\n"
                 f"📍 **موقع القمر:** {moon_sign} {int(moon_deg)}°\n"
-                f"⏰ **الوقت:** {datetime.datetime.now().strftime('%H:%M')}\n\n"
+                f"⏰ **الوقت:** {(datetime.datetime.now() + datetime.timedelta(hours=3)).strftime('%H:%M')}\n\n"
                 f"──────────────\n\n"
             )
             
