@@ -7,53 +7,73 @@ import pandas as pd
 from config import ZODIAC_SIGNS
 from transits import angle_diff, get_aspect_details
 
-def get_moon_position_interpolated(transit_df, target_dt):
+def get_moon_position_interpolated(moon_df, target_dt):
     """
-    حساب موقع القمر بالتقريب (Interpolation) من ملف الترانزيت اليومي
+    الحصول على موقع القمر للساعة المحددة (بدون تقريب إذا توفرت الساعة)
     """
-    # 1. البحث عن بيانات اليوم واليوم التالي
-    target_date = target_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    next_date = target_date + datetime.timedelta(days=1)
+    # تقريب الوقت لأقرب ساعة (لأن الملف يحتوي على بيانات كل ساعة)
+    # أو يمكننا استخدام الساعة الحالية فقط (floor)
+    target_hour = target_dt.replace(minute=0, second=0, microsecond=0)
     
-    # التأكد من وجود عمود القمر
-    if "Moon Lng" not in transit_df.columns:
-        return None, None, 0
+    # محاولة العثور على الصف المطابق للساعة
+    row = moon_df[moon_df["Datetime"] == target_hour]
+    
+    if not row.empty:
+        # وجدنا الساعة بالضبط
+        moon_lng = float(row.iloc[0]["Moon Lng"])
         
-    row_today = transit_df[transit_df["Datetime"] == target_date]
-    row_next = transit_df[transit_df["Datetime"] == next_date]
+        # استخدام البرج من الملف إذا وجد
+        if "Moon Sign" in row.columns:
+            sign_name = row.iloc[0]["Moon Sign"]
+            # ترجمة اسم البرج إذا كان بالإنجليزية
+            english_to_arabic = {
+                "Aries": "الحمل", "Taurus": "الثور", "Gemini": "الجوزاء",
+                "Cancer": "السرطان", "Leo": "الأسد", "Virgo": "العذراء",
+                "Libra": "الميزان", "Scorpio": "العقرب", "Sagittarius": "القوس",
+                "Capricorn": "الجدي", "Aquarius": "الدلو", "Pisces": "الحوت"
+            }
+            sign_name = english_to_arabic.get(sign_name, sign_name)
+            
+            # حساب الدرجة داخل البرج
+            # كل برج 30 درجة. الدرجة داخل البرج = الدرجة المطلقة % 30
+            degree_in_sign = moon_lng % 30
+            
+            return sign_name, degree_in_sign, moon_lng
+            
+    # إذا لم نجد الساعة (fallback)، نستخدم المنطق القديم (Interpolation)
+    # ... (يمكن إبقاؤه كاحتياط، لكن في حالتنا الملف بالساعة)
     
-    if row_today.empty:
-        return None, None, 0
-        
-    pos_today = float(row_today.iloc[0]["Moon Lng"])
-    
-    # إذا لم نجد بيانات الغد، نستخدم سرعة تقريبية (13 درجة/يوم)
-    if row_next.empty:
-        pos_next = pos_today + 13.2
-    else:
-        pos_next = float(row_next.iloc[0]["Moon Lng"])
-        
-    # التعامل مع الانتقال من الحوت (360) للحمل (0)
-    if pos_next < pos_today:
-        pos_next += 360
-        
-    # 2. حساب النسبة المئوية للوقت المنقضي من اليوم
-    seconds_passed = (target_dt - target_date).total_seconds()
-    total_seconds = 86400 # 24 hours
-    ratio = seconds_passed / total_seconds
-    
-    # 3. Interpolation
-    current_pos = pos_today + (pos_next - pos_today) * ratio
-    current_pos = current_pos % 360
-    
-    # تحديد البرج
-    sign_index = int(current_pos // 30)
-    sign_name = ZODIAC_SIGNS[sign_index % 12]
-    degree_in_sign = current_pos % 30
-    
-    return sign_name, degree_in_sign, current_pos
+    # سنحاول البحث عن أقرب صف سابق
+    row_prev = moon_df[moon_df["Datetime"] <= target_dt].tail(1)
+    if not row_prev.empty:
+         moon_lng = float(row_prev.iloc[0]["Moon Lng"])
+         sign_name = row_prev.iloc[0]["Moon Sign"] if "Moon Sign" in row_prev.columns else None
+         
+         # ترجمة
+         if sign_name:
+             english_to_arabic = {
+                "Aries": "الحمل", "Taurus": "الثور", "Gemini": "الجوزاء",
+                "Cancer": "السرطان", "Leo": "الأسد", "Virgo": "العذراء",
+                "Libra": "الميزان", "Scorpio": "العقرب", "Sagittarius": "القوس",
+                "Capricorn": "الجدي", "Aquarius": "الدلو", "Pisces": "الحوت"
+            }
+             sign_name = english_to_arabic.get(sign_name, sign_name)
 
-def check_moon_intraday(stock_df, transit_df, target_date=None):
+         degree_in_sign = moon_lng % 30
+         return sign_name, degree_in_sign, moon_lng
+
+    return None, 0, 0
+
+def normalize_stock_name(name):
+    """توحيد أسماء الأسهم لإزالة التكرار"""
+    if not isinstance(name, str):
+        return str(name)
+    name = name.strip()
+    # توحيد الألف
+    name = name.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    return name
+
+def check_moon_intraday(stock_df, moon_df, target_date=None):
     """
     فحص فرص المضاربة اللحظية للقمر مع أسهم القائمة
     """
@@ -62,12 +82,19 @@ def check_moon_intraday(stock_df, transit_df, target_date=None):
         now_ksa = datetime.datetime.now() + datetime.timedelta(hours=3)
     else:
         # إذا تم تمرير تاريخ، نستخدم منتصف ذلك اليوم كنقطة مرجعية
-        now_ksa = target_date.replace(hour=12, minute=0, second=0)
+        # أو نستخدمه كما هو إذا كان datetime
+        if isinstance(target_date, datetime.datetime):
+            now_ksa = target_date
+        else:
+            now_ksa = datetime.datetime.combine(target_date, datetime.time(12, 0))
 
-    sign_name, moon_deg_sign, moon_abs_deg = get_moon_position_interpolated(transit_df, now_ksa)
+    sign_name, moon_deg_sign, moon_abs_deg = get_moon_position_interpolated(moon_df, now_ksa)
     
+    # Debug print for Moon position
+    print(f"DEBUG: Moon Calc - Time: {now_ksa}, Sign: {sign_name}, Deg: {moon_deg_sign}, Abs: {moon_abs_deg}")
+
     if sign_name is None:
-        return [], "غير معروف", 0
+        return [], "غير معروف", 0, ""
     
     # تحديد عنصر البرج
     element = ""
@@ -81,12 +108,20 @@ def check_moon_intraday(stock_df, transit_df, target_date=None):
         element = "مائي 💧"
 
     results = []
+    seen_opportunities = set() # لتجنب التكرار
     
     for _, row in stock_df.iterrows():
         stock_planet_deg = row["الدرجة الفلكية"]
         stock_name = row["السهم"]
+        # تخطي مؤشرات (مثل "تاسي") لأنها ليست أسهم فعلية
+        if normalize_stock_name(stock_name) == "تاسي":
+            continue
         planet_name = row["الكوكب"]
         
+        # تخطي إذا كانت البيانات ناقصة
+        if pd.isna(stock_name) or pd.isna(planet_name):
+            continue
+
         angle = angle_diff(moon_abs_deg, stock_planet_deg)
         
         # نستخدم دالة get_aspect_details مع orb أوسع (2.5 درجة)
@@ -94,6 +129,15 @@ def check_moon_intraday(stock_df, transit_df, target_date=None):
         
         # الشرط الجديد: تفعيل العلاقة إذا كانت في حدود 1 درجة (تفعيل أو صميم)
         if asp_name and is_applying and dev <= 1.0:
+            
+            # مفتاح فريد للفرصة: (اسم السهم الموحد، الكوكب، العلاقة)
+            norm_name = normalize_stock_name(stock_name)
+            opp_key = (norm_name, planet_name, asp_name)
+            
+            if opp_key in seen_opportunities:
+                continue
+            seen_opportunities.add(opp_key)
+
             status = ""
             advice = ""
             
@@ -114,7 +158,7 @@ def check_moon_intraday(stock_df, transit_df, target_date=None):
                     advice = "📉 **سلبي:** ضغط بيعي يزداد"
             
             results.append({
-                "السهم": stock_name,
+                "السهم": stock_name, # نبقي الاسم الأصلي للعرض
                 "الكوكب": planet_name,
                 "العلاقة": asp_name,
                 "الرمز": icon,
@@ -128,3 +172,31 @@ def check_moon_intraday(stock_df, transit_df, target_date=None):
             })
             
     return results, sign_name, moon_deg_sign, element
+
+def scan_moon_day(stock_df, moon_df, day_date):
+    """
+    مسح شامل لليوم (24 ساعة) للبحث عن الفرص
+    """
+    hourly_results = {}
+    
+    # التأكد من أن day_date هو بداية اليوم
+    start_of_day = day_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    for h in range(24):
+        current_dt = start_of_day + datetime.timedelta(hours=h)
+        
+        # نستخدم الدالة الموجودة لفحص هذه الساعة
+        # ملاحظة: check_moon_intraday تقوم بفلترة التكرار داخلياً لنفس الاستدعاء
+        # لكن هنا نريد تجميع كل الساعات. التكرار بين الساعات مقبول (لأن الزاوية قد تستمر)
+        results, sign, deg, elem = check_moon_intraday(stock_df, moon_df, current_dt)
+        
+        if results:
+            hourly_results[h] = {
+                "time": current_dt,
+                "moon_sign": sign,
+                "moon_deg": deg,
+                "element": elem,
+                "opportunities": results
+            }
+            
+    return hourly_results

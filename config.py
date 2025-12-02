@@ -133,7 +133,7 @@ MALEFIC_PLANETS = ["زحل", "المريخ"]
 # ==========================================
 # إعدادات البوت والأمان
 # ==========================================
-TOKEN = "8250995383:AAG0oogANqZ3bGrByNi60BXZ7s7bpQbPbFw"
+TOKEN = "8250995383:AAGhpbd4GtwlhaQbwX4nizReU6265rTMJds"
 ALLOWED_USERS = [
     344671948  # Admin ID
 ]
