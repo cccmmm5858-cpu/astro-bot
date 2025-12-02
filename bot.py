@@ -599,8 +599,23 @@ def handle_query(call):
                 next_date = target_date + datetime.timedelta(days=1)
 
                 try:
-                    results, sign_name, moon_deg, element = check_moon_intraday(GLOBAL_STOCK_DF, moon_source, target_date)
-                    moon_msg = format_moon_msg(results, sign_name, moon_deg, element, target_date)
+                    # استخدام المسح الساعي بدلاً من اللحظي
+                    hourly_results = scan_moon_day(GLOBAL_STOCK_DF, moon_source, target_date)
+                    
+                    # استخراج معلومات القمر العامة (من أول نتيجة أو من الوقت الحالي)
+                    if hourly_results:
+                        first_hour = sorted(hourly_results.keys())[0]
+                        first_entry = hourly_results[first_hour]
+                        sign_name = first_entry['moon_sign']
+                        moon_deg = first_entry['moon_deg']
+                        element = first_entry['element']
+                    else:
+                        # في حال عدم وجود فرص، نحسب موقع القمر الحالي للعرض فقط
+                        from moon_trading import get_moon_position_interpolated
+                        sign_name, moon_deg, _ = get_moon_position_interpolated(moon_source, target_date + datetime.timedelta(hours=12))
+                        element = "" # يمكن تحسينه لاحقاً
+
+                    moon_msg = format_moon_hourly_msg(hourly_results, sign_name, moon_deg, element, target_date)
                     
                     markup = InlineKeyboardMarkup()
                     markup.row(
