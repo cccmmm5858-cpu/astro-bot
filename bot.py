@@ -472,6 +472,35 @@ def start_command(message):
             print(f"ERROR: Failed to send fallback message: {e2}")
 
 
+@bot.message_handler(commands=['debug'])
+def debug_command(message):
+    if message.from_user.id not in ALLOWED_USERS:
+        return
+
+    status_msg = "🛠 **Debug Status:**\n\n"
+    
+    # Check Files
+    files = ["Stock.xlsx", "Transit.xlsx", "Moon.xlsx"]
+    for f in files:
+        exists = os.path.exists(f)
+        status_msg += f"📂 `{f}`: {'✅ Found' if exists else '❌ Missing'}\n"
+    
+    status_msg += "\n"
+    
+    # Check Dataframes
+    status_msg += f"📊 `GLOBAL_STOCK_DF`: {'✅ Loaded' if GLOBAL_STOCK_DF is not None else '❌ None'}\n"
+    if GLOBAL_STOCK_DF is not None:
+        status_msg += f"   - Rows: {len(GLOBAL_STOCK_DF)}\n"
+        
+    status_msg += f"🌍 `GLOBAL_TRANSIT_DF`: {'✅ Loaded' if GLOBAL_TRANSIT_DF is not None else '❌ None'}\n"
+    if GLOBAL_TRANSIT_DF is not None:
+        status_msg += f"   - Rows: {len(GLOBAL_TRANSIT_DF)}\n"
+        
+    status_msg += f"🌙 `GLOBAL_MOON_DF`: {'✅ Loaded' if GLOBAL_MOON_DF is not None else '❌ None'}\n"
+    
+    bot.reply_to(message, status_msg, parse_mode="Markdown")
+
+
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     print(f"DEBUG: Callback from user ID: {call.from_user.id}")
